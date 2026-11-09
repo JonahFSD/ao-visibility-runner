@@ -19,7 +19,7 @@ def open_session(directory):
 
 
 def pending(manifest, rows):
-    done = {r['key'] for r in rows if r['status'] == 'ok'}
+    done = {r['key'] for r in rows if r['status'] in ('ok', 'error')}
     # Round-robin questions before repetitions, matching NoLimit's balanced partial-run idea.
     return [(p, rep) for rep in range(1, manifest['config']['repetitions']+1)
             for p in manifest['prompts']['prompts'] if f"{p['id']}:{rep}" not in done]
@@ -33,7 +33,7 @@ def main():
     init.add_argument('--effort', required=True); init.add_argument('--search-mode', required=True)
     init.add_argument('--settings-note', required=True, help='Observed personalization/settings; unknown must be stated')
     init.add_argument('--repetitions', type=int, default=1)
-    for name in ('prompt','save','fail','status'):
+    for name in ('prompt','save','fail','unknown','status'):
         p = sub.add_parser(name); p.add_argument('directory')
         if name == 'prompt': p.add_argument('--copy', action='store_true')
         if name == 'save':
@@ -42,6 +42,8 @@ def main():
             p.add_argument('--evidence', required=True, help='Screenshot or transcript reference')
             p.add_argument('--notes', default=''); p.add_argument('--url', default='')
         if name == 'fail': p.add_argument('--reason', required=True)
+        if name == 'unknown':
+            p.add_argument('--key', required=True, help='Reservation for a submitted question whose answer could not be recovered')
     a = parser.parse_args()
     directory = Path(a.directory)
     if a.action == 'init':
@@ -59,7 +61,9 @@ def main():
     jobs = pending(manifest, rows)
     reservation = directory/'pending.json'
     if a.action == 'status':
-        print(json.dumps({'saved':len(rows), 'remaining':len(jobs), 'next':jobs[0][0]['id'] if jobs else None})); return
+        print(json.dumps({'saved':sum(r['status']=='ok' for r in rows),
+                          'unknown':sum(r['status']=='error' for r in rows),
+                          'remaining':len(jobs), 'next':jobs[0][0]['id'] if jobs else None})); return
     if not jobs: print('Complete. No prompts remain.'); return
     prompt, rep = jobs[0]
     key = f"{prompt['id']}:{rep}"
@@ -74,12 +78,25 @@ def main():
             subprocess.run(['pbcopy'],input=prompt['text'],text=True,check=True)
         return
     if not reservation.exists(): raise ValueError('Run prompt first to reserve this question')
+    ticket = json.loads(reservation.read_text())
+    if ticket['key'] != key or (a.action != 'fail' and a.key != key):
+        raise ValueError('Stale or incorrect answer key')
     if a.action == 'fail':
         with (directory/'failures.jsonl').open('a') as f:
             f.write(json.dumps({'key':key,'reason':a.reason,**timestamp()})+'\n')
         print('Failure preserved; question remains pending. Stop on account usage limits.'); return
-    ticket = json.loads(reservation.read_text())
-    if a.key != key or ticket['key'] != key: raise ValueError('Stale or incorrect answer key')
+    if a.action == 'unknown':
+        failures = [r for r in records(directory/'failures.jsonl') if r['key'] == key]
+        if not failures:
+            raise ValueError('Record the observed failure before marking a submitted question unknown')
+        row = {'key':key,'prompt_id':prompt['id'],'prompt':prompt['text'],'repetition':rep,
+               'suite_hash':manifest['config']['suite_hash'],'surface':'consumer-ui-manual',
+               'status':'error','error_type':'unrecoverable_browser_answer',
+               'reason':failures[-1]['reason'],'scores':None,**timestamp()}
+        with (directory/'evidence.jsonl').open('a') as f: f.write(json.dumps(row)+'\n')
+        reservation.unlink()
+        report(directory)
+        print(f'Recorded {key} as unknown; {len(jobs)-1} remaining'); return
     answer = sys.stdin.read().strip()
     if len(answer)<20 or answer==prompt['text'].strip(): raise ValueError('Empty/short answer or prompt echo refused')
     citations = json.loads(Path(a.citations).read_text())

@@ -14,7 +14,8 @@ The shell script manages evidence; an authorized browser agent or human drives C
    `python3.12 browser_runner.py save runs/chatgpt-november --key q01:1 --citations citations.json --evidence 'screenshots/q01.png' < answer.txt`
    Optional `--url` and `--notes` preserve provenance. Temporary chats can have blank URLs. Keep evidence private. Capture time is recorded UTC and America/Chicago.
 7. For an error use `python3.12 browser_runner.py fail runs/chatgpt-november --reason 'observed error'`. This does not consume a sample. Stop on usage limits and record reset time; do not switch accounts or evade limits. Never retry a possibly still-running submission.
-8. `python3.12 browser_runner.py status runs/chatgpt-november` resumes from successful saves; failure evidence remains. Keep one process per output folder. Review `report.md` and underlying evidence. Errors are unknown, not brand absence.
+8. If a question was submitted and its answer cannot be recovered, log the observed failure and then use `python3.12 browser_runner.py unknown runs/chatgpt-november --key q01:1` with its exact reservation key. This closes the job as unknown and allows collection to continue without resubmitting it.
+9. `python3.12 browser_runner.py status runs/chatgpt-november` shows saved answers, closed unknowns and the next pending question. Keep one process per output folder. Review `report.md` and underlying evidence. Errors are unknown, not brand absence.
 
 Target initially 20 actual browser answers. For a three-replicate study initialize with `--repetitions 3` (60 answers), balanced question-round-robin. Preserve exact cohort/settings for December and run `python3.12 compare.py BEFORE AFTER`. Human-review positive mentions, recommendation claims and answer accuracy.
 
